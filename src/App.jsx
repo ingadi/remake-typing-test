@@ -3,45 +3,39 @@ import clsx from 'clsx';
 import { useState, memo, useRef, useEffect } from 'react';
 import { debounce } from 'es-toolkit';
 
-const PHRASE = `The coffee shop was empty except for her, typing furiously at a corner table. 
-Steam rose from her untouched cup as rain drummed against the windows. 
-She glanced up when the bell chimed, watching a stranger shake off the storm. 
-Their eyes met for just a moment—two people caught between where they'd been and where they were going. 
-He ordered his coffee black, she returned to her screen, and the moment dissolved like sugar in hot water. 
-But sometimes the smallest encounters leave the deepest marks.`;
+const TEXT = `morning light filters through broken blinds across empty bottles on the kitchen table she counts backward from ten hoping the silence means something different today outside a dog barks at shadows while the world pretends everything is fine`;
 
-const CHARS = PHRASE.split('');
+const TOKENS = getTokens(TEXT);
 
 const FRAME_RATE = 16;
 
 function App() {
   const [mistakes, setMistakes] = useState(new Set());
-  const [currentLength, setCurrentLength] = useState(0);
+  const [totalTyped, setTotalTyped] = useState(0);
   const inputRef = useRef(null);
 
-  usePreventPaste();
+  useRestrictedTyping();
 
   const handleInput = debounce((e) => {
     const input = e.target.value;
 
-    if (input.length > CHARS.length) return;
+    if (input.length > TEXT.length) return;
 
     setMistakes((prevMistakes) => {
-      ``;
       const updatedMistakes = new Set(prevMistakes);
-      const hasDeletedChars = input.length < currentLength;
+      const hasDeletedCharacters = input.length < totalTyped;
 
-      if (hasDeletedChars) {
-        for (let i = input.length; i < currentLength; i++) {
+      if (hasDeletedCharacters) {
+        for (let i = input.length; i < totalTyped; i++) {
           updatedMistakes.delete(i);
         }
       } else {
-        const newSubstring = input.slice(currentLength);
-        const targetSubstring = PHRASE.substring(currentLength, input.length);
+        const typedSubstring = input.slice(totalTyped);
+        const targetSubstring = TEXT.substring(totalTyped, input.length);
 
         for (let i = 0; i < targetSubstring.length; i++) {
-          if (newSubstring[i] !== targetSubstring[i]) {
-            updatedMistakes.add(i + currentLength);
+          if (typedSubstring[i] !== targetSubstring[i]) {
+            updatedMistakes.add(i + totalTyped);
           }
         }
       }
@@ -49,71 +43,159 @@ function App() {
       return updatedMistakes;
     });
 
-    setCurrentLength(input.length);
+    setTotalTyped(input.length);
   }, FRAME_RATE);
 
-  const paragraph = CHARS.map((letter, idx) => (
-    <CharacterSpan
-      key={idx}
-      isActive={currentLength === idx}
-      hasMistake={mistakes.has(idx)}
-      letter={letter}
-      wasTyped={currentLength > idx}
-    />
-  ));
+  function handleRestart() {
+    setMistakes(new Set());
+    setTotalTyped(0);
+    inputRef.current.focus();
+    inputRef.current.select();
+    inputRef.current.value = '';
+  }
+
+  const text = TOKENS.reduce((text, token, tokenIndex) => {
+    const { characters, startIdx } = token;
+
+    text.push(
+      <Segment
+        key={tokenIndex}
+        startIdx={startIdx}
+        length={characters.length}
+        totalTyped={totalTyped}>
+        {characters.map((character, characterIdx) => (
+          <Character
+            key={startIdx + characterIdx}
+            character={character}
+            hasMistake={mistakes.has(startIdx + characterIdx)}
+            wasTyped={startIdx + characterIdx < totalTyped}
+          />
+        ))}
+      </Segment>
+    );
+    return text;
+  }, []);
 
   return (
-    <main className='min-h-screen min-w-screen flex items-center'>
-      <div className='mx-auto'>
-        <textarea
-          ref={inputRef}
-          autoFocus
-          className='peer opacity-0 pointer-events-none'
-          onInput={handleInput}
-        />
-        <p
-          className='mx-4 opacity-10 peer-focus:opacity-100 transition-all font-mono text-2xl max-w-4xl select-none cursor-pointer'
-          onClick={() => inputRef.current.focus()}>
-          {paragraph}
-        </p>
-      </div>
+    <main className='min-h-screen min-w-screen relative flex flex-col justify-center items-center gap-2'>
+      <button onClick={handleRestart} className='flex gap-1 items-end'>
+        &#10226; <span className='text-sm'> Restart</span>
+      </button>
+      <textarea
+        ref={inputRef}
+        autoFocus
+        className='peer opacity-0 absolute'
+        onInput={handleInput}
+      />
+      <p
+        onClick={() => inputRef.current.focus()}
+        className='peer-focus:blur-none peer-focus:opacity-100 opacity-50 blur-xs font-mono text-2xl max-w-4xl transition-all duration-150 select-none'>
+        {text}
+      </p>
+      <p className='peer-focus:invisible visible flex items-center gap-1 absolute mx-auto z-10 pointer-events-none select-none'>
+        <span>&#9757;</span>
+        <span>Click here to start typing</span>
+      </p>
     </main>
   );
 }
 
 export default App;
 
-const CharacterSpan = memo(({ isActive, hasMistake, letter, wasTyped }) => (
-  <span className='inline-flex h-8 items-center'>
+function Segment({ children, startIdx, length, totalTyped }) {
+  const isCurrent = totalTyped >= startIdx && totalTyped < startIdx + length;
+  const cursorOffset = Math.min(Math.max(totalTyped - startIdx, 0), length);
+
+  return (
     <span
       className={clsx(
-        'w-1 rounded-2xl h-full animate-pulse bg-blue-500 invisible',
-        isActive && 'visible'
-      )}
-    />
-    <span
-      className={clsx(wasTyped && 'opacity-60', hasMistake && 'text-red-500')}>
-      {letter}
+        isCurrent && 'text-purple-400',
+        'whitespace-nowrap inline-flex flex-col'
+      )}>
+      <span>{children}</span>
+      <span
+        style={{ transform: `translateX(${cursorOffset}ch)` }}
+        className={clsx(
+          isCurrent && 'visible',
+          `invisible gap-7 transition-all duration-75 w-[1ch] outline-1 outline-white`
+        )}
+      />
     </span>
+  );
+}
+
+const Character = memo(({ hasMistake, character, wasTyped }) => (
+  <span
+    className={clsx(
+      wasTyped && 'opacity-60',
+      hasMistake && 'text-red-400',
+      'w-[1ch]'
+    )}>
+    {SYMBOLS[character] || character}
   </span>
 ));
 
-function usePreventPaste() {
-  useEffect(() => {
-    function handlePaste(e) {
-      const isKeyCtrlV =
-        (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v';
+function getTokens(text) {
+  const tokens = [];
 
-      if (isKeyCtrlV) {
+  for (let i = 0; i < text.length; ) {
+    const startIdx = i;
+    const characters = [];
+
+    if (!checkIsWord(text[i])) {
+      characters.push(text[i]);
+      i++;
+    } else {
+      while (i < text.length && checkIsWord(text[i])) {
+        characters.push(text[i]);
+        i++;
+      }
+    }
+
+    tokens.push({ startIdx, characters });
+  }
+
+  return tokens;
+}
+
+const SYMBOLS = {
+  ' ': <>&not;</>,
+};
+
+function checkIsWord(str) {
+  return /\w/.test(str);
+}
+
+function useRestrictedTyping() {
+  useEffect(() => {
+    function handleKeyRestrictions(e) {
+      const RESTRICTIONS = [
+        (e.ctrlKey || e.metaKey) &&
+          ['v', 'a', 'x', 'c', 'z', 'y', 'arrowleft', 'arrowright'].includes(
+            e.key.toLowerCase()
+          ), // text manipulation shortcuts
+        [
+          'ArrowLeft',
+          'ArrowRight',
+          'ArrowUp',
+          'ArrowDown',
+          'Home',
+          'End',
+          'PageUp',
+          'PageDown',
+        ].includes(e.key), // cursor manipulation
+      ];
+
+      if (RESTRICTIONS.some(Boolean)) {
         e.preventDefault();
         return false;
       }
     }
 
-    document.addEventListener('keydown', handlePaste);
+    document.addEventListener('keydown', handleKeyRestrictions);
 
     return () => {
-      document.removeEventListener('keydown', handlePaste);
+      document.removeEventListener('keydown', handleKeyRestrictions);
     };
   }, []);
 }
